@@ -393,6 +393,7 @@ except ImportError:
 
 
 def unwrap_model(model, module_instances=ALL_MODULE_WRAPPER_CLASSNAMES):
+    module_instances = tuple(m for m in module_instances if isinstance(m, type))
     return_list = True
     if not isinstance(model, list):
         model = [model]
@@ -1052,6 +1053,9 @@ def register_megatron_training_hooks(model: list[torch.nn.Module], optimizer):
 
     try:
         from megatron.core.distributed.fsdp.mcore_fsdp_adapter import FullyShardedDataParallel as megatron_FSDP
+
+        if not isinstance(megatron_FSDP, type):
+            from megatron.core.distributed.fsdp.src.megatron_fsdp.megatron_fsdp import MegatronFSDP as megatron_FSDP
     except ImportError:
         megatron_FSDP = DDP
 
