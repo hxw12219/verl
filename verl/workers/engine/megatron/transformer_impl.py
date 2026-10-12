@@ -1215,6 +1215,7 @@ class MegatronEngineWithLMHead(MegatronEngine):
     def forward_step(
         self, batch_iter: Iterator[TensorDict], model, logits_processor_func, postprocess_micro_batch_func
     ):
+        """Run one language-model microbatch with router replay and return outputs plus a postprocessing callback."""
         batch: TensorDict = next(batch_iter)
 
         batch = batch.to(get_device_id())
@@ -1489,6 +1490,7 @@ class MegatronEngineWithLMHead(MegatronEngine):
 class MegatronEngineWithValueHead(MegatronEngineWithLMHead):
     # for value head
     def forward_step(self, batch_iter, model, logits_processor_func, postprocess_micro_batch_func):
+        """Run one value-model microbatch and return its outputs with a bound postprocessing callback."""
         batch: TensorDict = next(batch_iter)
         batch = batch.to(get_device_id())
         model_inputs = self.prepare_model_inputs(batch)
