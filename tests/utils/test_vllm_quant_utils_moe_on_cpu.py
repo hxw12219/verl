@@ -152,6 +152,7 @@ PACKED_MODULES_MAPPING = {
 
 
 def test_vlm_checkpoint_names_resolve_to_live_module():
+    """Verify the checkpoint mapper resolves VLM parameter names to the live projection module."""
     mod, ns = _load_quant_utils(fused_moe_is_function=False)
     model = torch.nn.Module()
     model.packed_modules_mapping = {}

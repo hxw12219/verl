@@ -652,6 +652,7 @@ class vLLMHttpServer:
 
         self._preprocess_sampling_params(sampling_params)
         sampling_params = SamplingParams(max_tokens=max_tokens, **sampling_params)
+        actor_prompt_ids = prompt_ids
         prompt_ids = qwen2_5_vl_dedup_image_tokens(prompt_ids, self.model_config.processor)
         multi_modal_data = {}
         if image_data is not None:
@@ -744,6 +745,8 @@ class vLLMHttpServer:
 
         routed_experts = None
         if self.config.enable_rollout_routing_replay:
+            if final_res.prompt_token_ids != actor_prompt_ids:
+                raise ValueError("Rollout routing replay requires identical actor and rollout prompt tokens")
             routed_experts = final_res.outputs[0].routed_experts
 
         # Determine stop reason from finish_reason
@@ -892,6 +895,7 @@ class vLLMHttpServer:
             logger.info("skip wake_up in standalone mode")
 
     async def sleep(self):
+        """Release rollout resources on the leading node according to the configured rollout and sleep modes."""
         if self.node_rank != 0 or not self.config.free_cache_engine:
             return
 
@@ -1403,16 +1407,12 @@ class vLLMHttpServer:
                 num_layers = text_cfg.num_hidden_layers
                 model_type = getattr(hf_cfg, "model_type", "")
 
-                if model_type == "glm5_next":
+                ckpt_quant = getattr(hf_cfg, "quantization_config", {}) or {}
+                ckpt_ignored_layers = ckpt_quant.get("modules_to_not_convert")
+                if model_type == "glm5_next" and ckpt_ignored_layers is not None:
                     # Reuse the checkpoint's own modules_to_not_convert list so the
                     # rollout FP8 scope matches native vLLM exactly.
-                    ckpt_quant = getattr(hf_cfg, "quantization_config", {}) or {}
-                    ignored_layers = list(ckpt_quant.get("modules_to_not_convert", []) or [])
-                    if not ignored_layers:
-                        raise ValueError(
-                            "glm5_next FP8 rollout needs modules_to_not_convert "
-                            "in the checkpoint quantization_config, but it is empty."
-                        )
+                    ignored_layers = list(ckpt_ignored_layers)
                 else:
                     layer_pfx = "language_model.model.layers" if model_type == "glm5_next" else "model.layers"
                     for layer in range(num_layers):

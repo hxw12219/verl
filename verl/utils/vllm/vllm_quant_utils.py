@@ -198,6 +198,11 @@ def _is_mtp_layer_weight(name, model) -> bool:
 
 
 def get_module_from_param_name(model, name: str):
+    """Resolve a checkpoint parameter to its live module, accounting for mapping, fusion, and LoRA.
+
+    Per-expert paths resolve to their fused weight owner. If traversal fails,
+    warn and return the deepest resolved module or its expert weight owner.
+    """
     # Translate the checkpoint namespace to the live VLM module hierarchy.
     mapper = getattr(model, "hf_to_vllm_mapper", None)
     if mapper is not None:
@@ -255,6 +260,7 @@ _FP8_CANDIDATE_LEAVES: frozenset = frozenset({"weight", "gate_up_proj", "down_pr
 
 
 def is_fp8_weight(name, model):
+    """Cache whether a weight belongs to an FP8 linear or expert layer, excluding MTP layer weights."""
     # The actor exports the optional next-token-prediction (MTP) layer, while
     # the vLLM runtime omits it when MTP is disabled. Skip those weights so
     # verl does not re-quantize BF16->FP8 for a layer rollout never loads.
@@ -550,6 +556,12 @@ def process_quanted_weights_after_loading(model, reload_state):
 
 
 def load_quanted_weights(weights, model_runner, is_drafter=False, peft_config=None):
+    """Quantize and load a weight bucket into the rollout model or its MTP drafter.
+
+    When peft_config is provided, reconcile LoRA base-layer names with the
+    live namespace. Restore temporary parameter classes after loading and
+    return the names reported by the model loader.
+    """
     if is_drafter:
         drafter = getattr(model_runner, "drafter", None)
         model = drafter.model if drafter is not None and hasattr(drafter, "model") else None

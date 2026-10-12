@@ -88,6 +88,7 @@ def _resolve_mxfp4_quant_method(module):
 
 
 def _is_mxfp4_fused_moe_module(module):
+    """Check whether a routed-expert module uses MXFP4, including a LoRA-wrapped quantization method."""
     from vllm.model_executor.layers.fused_moe import RoutedExperts
 
     return isinstance(module, RoutedExperts) and _resolve_mxfp4_quant_method(module) is not None
@@ -225,6 +226,7 @@ def _replace_parameter_in_place(layer, param_name, new_data, prefer_copy=False):
 
 
 def _process_mxfp4_moe_params(module):
+    """Repack staged MXFP4 expert weights into live storage and reject any unrestored parameters."""
     from vllm.model_executor.layers.quantization import mxfp4 as vllm_mxfp4
 
     # Use the legacy Mxfp4MoEMethod for the repack: the modular wrapper that
