@@ -284,8 +284,8 @@ EXTRA=(
 
 # FP8 hybrid blockwise training + FP8 rollout. When USE_FP8=1 the actor forward
 # uses E4M3 / backward E5M2 blockwise quantization, and the vLLM rollout runs in
-# FP8 with FP8 KV cache. kda_disable_fp8 and mla_proj_disable_quantization keep the
-# KDA and MLA attention paths in BF16 for numerical stability. The TE backward
+# FP8 with FP8 KV cache. kda_disable_fp8 and mla_proj_use_quantization=False keep
+# the KDA and MLA attention paths in BF16 for numerical stability. The TE backward
 # amax_epsilon=1e-12 fix (in Megatron-LM fp8_utils.py) is required to avoid NaN
 # grad_norm from all-zero gradient blocks. TP defaults to 4 to keep the
 # 64-output beta projection aligned to FP8 GEMM's 16-column minimum.
@@ -294,7 +294,7 @@ if [ "${USE_FP8}" = 1 ]; then
         +actor_rollout_ref.actor.megatron.override_transformer_config.fp8=hybrid
         +actor_rollout_ref.actor.megatron.override_transformer_config.fp8_recipe=blockwise
         +actor_rollout_ref.actor.megatron.override_transformer_config.kda_disable_fp8=True
-        +actor_rollout_ref.actor.megatron.override_transformer_config.mla_proj_disable_quantization=True
+        +actor_rollout_ref.actor.megatron.override_transformer_config.mla_proj_use_quantization=False
         +actor_rollout_ref.actor.megatron.override_transformer_config.attention_dropout=0.0
         +actor_rollout_ref.actor.megatron.override_transformer_config.hidden_dropout=0.0
         +actor_rollout_ref.actor.optim.override_optimizer_config.fp8_recipe=blockwise
