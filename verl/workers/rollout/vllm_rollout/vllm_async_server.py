@@ -346,10 +346,10 @@ class vLLMHttpServer:
             "seed": self.replica_rank + self.config.seed,
             "override_generation_config": json.dumps(override_generation_config),
             "quantization": quantization,
-            "hf_overrides": hf_overrides,
             "scheduling_policy": self.config.scheduling_policy,
             "compilation_config": compilation_config,
             **engine_kwargs,
+            "hf_overrides": hf_overrides,
         }
 
         # update profiler args, only on the replica that will actually be profiled: configuring
