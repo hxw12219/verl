@@ -652,7 +652,7 @@ class vLLMHttpServer:
 
         self._preprocess_sampling_params(sampling_params)
         sampling_params = SamplingParams(max_tokens=max_tokens, **sampling_params)
-        actor_prompt_ids = prompt_ids
+        actor_prompt_ids = list(prompt_ids)
         prompt_ids = qwen2_5_vl_dedup_image_tokens(prompt_ids, self.model_config.processor)
         multi_modal_data = {}
         if image_data is not None:
@@ -745,7 +745,18 @@ class vLLMHttpServer:
 
         routed_experts = None
         if self.config.enable_rollout_routing_replay:
-            if final_res.prompt_token_ids != actor_prompt_ids:
+            rollout_prompt_ids = final_res.prompt_token_ids or []
+            if (
+                getattr(getattr(self.model_config, "hf_config", None), "model_type", None) == "deepseek_v41"
+                and image_data is not None
+            ):
+                image_token_id = self.model_config.hf_config.image_token_id
+                rollout_prompt_ids = [
+                    token_id
+                    for index, token_id in enumerate(rollout_prompt_ids)
+                    if token_id != image_token_id or index == 0 or rollout_prompt_ids[index - 1] != image_token_id
+                ]
+            if rollout_prompt_ids != actor_prompt_ids:
                 raise ValueError("Rollout routing replay requires identical actor and rollout prompt tokens")
             routed_experts = final_res.outputs[0].routed_experts
 
