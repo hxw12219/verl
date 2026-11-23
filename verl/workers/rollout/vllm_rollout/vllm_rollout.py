@@ -245,7 +245,7 @@ class ServerAdapter(BaseRollout):
 
         # reset caches after updating weights
         if self._has_server:
-            await self.server_handle.clear_kv_cache.remote()
+            await self.server_handle.clear_kv_cache.remote(require_reset=True)
             if global_steps is not None:
                 await self.server_handle.set_global_steps.remote(global_steps)
 
@@ -314,7 +314,7 @@ class ServerAdapter(BaseRollout):
         await self._execute_method("finish_weight_update")
 
         if self._has_server:
-            await self.server_handle.clear_kv_cache.remote()
+            await self.server_handle.clear_kv_cache.remote(require_reset=True)
             if global_steps is not None:
                 await self.server_handle.set_global_steps.remote(global_steps)
 

@@ -979,23 +979,54 @@ class vLLMHttpServer:
             )
         await self.engine.sleep(level=level)
 
-    async def _reset_prefix_cache(self):
+    async def _reset_prefix_cache(self) -> bool:
         # Under "reset", reset_connector=True also drops any attached external KV store
         # (e.g. MooncakeStoreConnector) whose entries were computed against the previous
-        # weights; with no connector it is a no-op success. Under "salt" those entries
-        # are unreachable through their old salt, so the store, which other replicas may
-        # still be reading and writing, is left intact.
-        await self.engine.reset_prefix_cache(reset_connector=self.config.external_kv_cache_invalidation == "reset")
+        # weights. Under "salt" those entries are unreachable through their old salt, so
+        # the store, which other replicas may still be reading and writing, is left intact.
+        # vLLM attaches a connector exactly when kv_transfer_config is set, including the one
+        # derived from kv_offloading_size. Only an attached connector is reset because vLLM
+        # < 0.23 reports a connector reset without one as a failed prefix-cache reset.
+        reset_connector = (
+            self.config.external_kv_cache_invalidation == "reset"
+            and self.engine.vllm_config.kv_transfer_config is not None
+        )
+        # True if vLLM cleared the prefix cache. False if any KV block was still in use, including blocks
+        # a KV connector holds after their request finished (the affected block pool retains its cached
+        # prefixes), or the connector failed to reset.
+        return await self.engine.reset_prefix_cache(reset_connector=reset_connector)
 
     @RLInsightLogger.trace_state_decorator(
         "clear_kv_cache", state_lane_id=lambda self: ray.get_runtime_context().get_actor_name()
     )
-    async def clear_kv_cache(self):
+    async def clear_kv_cache(self, require_reset: bool = False):
+        """Clear the prefix, multimodal and encoder caches.
+
+        Args:
+            require_reset: Check that vLLM reset the prefix cache. Weight updates pass True. In reset
+                mode, prefix cache keys do not include the current policy weight version, so blocks
+                computed with the previous weights that survive a refused reset could be reused by later
+                requests with the same prompt prefix, and a refusal raises. In salt mode, later requests
+                carry the new weights' salt and cannot match those blocks, so a refusal only logs a warning.
+        """
         if self.node_rank == 0:
-            await self._reset_prefix_cache()
+            reset = await self._reset_prefix_cache()
 
             await self.engine.reset_mm_cache()
             await self.engine.reset_encoder_cache()
+
+            if require_reset and not reset:
+                if self.config.external_kv_cache_invalidation == "salt":
+                    logger.warning(
+                        "vLLM refused to reset the prefix cache after a weight update; continuing because blocks "
+                        "computed with the previous weights are unreachable under a new salt"
+                    )
+                else:
+                    raise RuntimeError(
+                        "vLLM refused to reset the prefix cache after a weight update (KV blocks still in use, "
+                        "e.g. held by a KV connector transfer, or the KV connector failed to reset); later "
+                        "requests could reuse prefix KV computed with the previous weights"
+                    )
 
     @RLInsightLogger.trace_state_decorator(
         "release_kv_cache", state_lane_id=lambda self: ray.get_runtime_context().get_actor_name()

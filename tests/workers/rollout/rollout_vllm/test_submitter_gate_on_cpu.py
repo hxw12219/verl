@@ -23,6 +23,9 @@ They also pin abort_all_requests(reject_request=True), which fails late arrivals
 instead of parking them when the server is leaving the load balancer and no
 resume_generation() is coming soon.
 
+They also pin that a weight update in reset mode fails when vLLM refuses to reset
+the prefix cache, which would otherwise keep blocks computed with the previous weights.
+
 Finally, they pin where generate() runs the request hooks relative to the gate:
 _preprocess_sampling_params before admission, _postprocess_output after release.
 """
@@ -31,6 +34,7 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+import torch
 
 pytest.importorskip("ray")
 pytest.importorskip("vllm")
@@ -46,6 +50,7 @@ class _FakeEngine:
 
     def __init__(self):
         self.output_processor = SimpleNamespace(request_states={}, parent_requests={})
+        self.vllm_config = SimpleNamespace(kv_transfer_config=None)
         self.server = None
         self.pause_calls = 0
         self.pause_kwargs = []
@@ -54,6 +59,7 @@ class _FakeEngine:
         self.abort_calls = []
         self.drain_calls = 0
         self.reset_prefix_calls = 0
+        self.reset_prefix_result = True
         self.reset_connector_args = []
         self.pause_kwargs = []
         self.outputs = []
@@ -100,6 +106,7 @@ class _FakeEngine:
     async def reset_prefix_cache(self, reset_connector=True):
         self.reset_prefix_calls += 1
         self.reset_connector_args.append(reset_connector)
+        return self.reset_prefix_result
 
     async def reset_mm_cache(self):
         pass
@@ -602,15 +609,114 @@ def test_abort_keeps_external_kv_store_only_when_salted(mode, clear_cache, reset
     asyncio.run(main())
 
 
-@pytest.mark.parametrize("mode,reset_connector", [("reset", True), ("salt", False)])
-def test_clear_kv_cache_resets_connector_only_in_reset_mode(mode, reset_connector):
+_CONNECTOR = SimpleNamespace(kv_connector="OffloadingConnector")
+
+
+@pytest.mark.parametrize(
+    "mode,kv_transfer_config,reset_connector",
+    [("reset", _CONNECTOR, True), ("reset", None, False), ("salt", _CONNECTOR, False)],
+)
+def test_clear_kv_cache_resets_connector_only_when_attached_in_reset_mode(mode, kv_transfer_config, reset_connector):
+    # vLLM < 0.23 returns False from reset_prefix_cache(reset_connector=True) when no connector is attached.
     async def main():
         server = _make_server()
         server.config = RolloutConfig(name="vllm", external_kv_cache_invalidation=mode)
+        server.engine.vllm_config.kv_transfer_config = kv_transfer_config
 
         await server.clear_kv_cache()
 
         assert server.engine.reset_connector_args == [reset_connector]
+
+    asyncio.run(main())
+
+
+@pytest.mark.parametrize(
+    "mode,require_reset,raises,warns",
+    [("reset", True, True, False), ("reset", False, False, False), ("salt", True, False, True)],
+)
+def test_clear_kv_cache_fails_on_refused_reset_only_when_required_in_reset_mode(
+    monkeypatch, mode, require_reset, raises, warns
+):
+    # vLLM refuses while blocks are in use. abort_request() clears with other requests still
+    # running, so only a weight update, which drains or aborts every request first, may fail.
+    # Under "salt" later requests carry a new salt and cannot match the old blocks.
+    warnings = []
+    monkeypatch.setattr(vllm_async_server.logger, "warning", lambda msg, *args: warnings.append(msg))
+
+    async def main():
+        server = _make_server()
+        server.config = RolloutConfig(name="vllm", external_kv_cache_invalidation=mode)
+        server.engine.reset_prefix_result = False
+
+        if raises:
+            with pytest.raises(RuntimeError, match="refused to reset the prefix cache"):
+                await server.clear_kv_cache(require_reset=require_reset)
+        else:
+            await server.clear_kv_cache(require_reset=require_reset)
+
+        assert server.engine.reset_prefix_calls == 1
+        assert any("refused to reset the prefix cache" in w for w in warnings) is warns
+
+    asyncio.run(main())
+
+
+@pytest.mark.parametrize("wire_format", ["named_tensors", "delta_flush"])
+@pytest.mark.parametrize("reset_result", [True, False])
+def test_weight_update_fails_when_prefix_cache_reset_is_refused(monkeypatch, wire_format, reset_result):
+    from verl.workers.rollout.vllm_rollout import vllm_rollout
+
+    class _Sender:
+        def __init__(self, **kwargs):
+            pass
+
+        async def async_send_weights(self, weights):
+            list(weights)
+
+    async def execute_method(method, **kwargs):
+        return None
+
+    async def main():
+        server = _make_server()
+        server.engine.reset_prefix_result = reset_result
+        calls = []
+
+        class _ServerHandle:
+            # Runs the real server methods in-process in place of Ray actor calls.
+            def __getattr__(self, name):
+                async def remote(*args, **kwargs):
+                    calls.append(name)
+                    return await getattr(server, name)(*args, **kwargs)
+
+                return SimpleNamespace(remote=remote)
+
+        monkeypatch.setattr(vllm_rollout, "BucketedWeightSender", _Sender)
+        adapter = object.__new__(vllm_rollout.ServerAdapter)
+        adapter.config = SimpleNamespace(
+            free_cache_engine=False, checkpoint_engine=SimpleNamespace(update_weights_bucket_megabytes=1)
+        )
+        adapter.use_shm = False
+        adapter.zmq_handle = None
+        adapter.replica_rank = 0
+        adapter.rollout_rank = 0
+        adapter._has_server = True
+        adapter.server_handle = _ServerHandle()
+        adapter._delta_weight_transfer_engine_initialized = True
+        adapter._execute_method = execute_method
+
+        weights = [("w", torch.zeros(1))]
+        if wire_format == "delta_flush":
+            weights = [(weights, True)]
+        update = adapter.update_weights(iter(weights), global_steps=3, wire_format=wire_format)
+
+        if reset_result:
+            await update
+            assert calls == ["clear_kv_cache", "set_global_steps"]
+            assert server.global_steps == 3
+        else:
+            with pytest.raises(RuntimeError, match="refused to reset the prefix cache"):
+                await update
+            assert calls == ["clear_kv_cache"]
+            assert server.global_steps == 7
 
     asyncio.run(main())
 
