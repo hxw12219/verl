@@ -181,9 +181,11 @@ def _prefix_packed_flash_attention_forward(
     """
     for key in ("cu_seq_lens_q", "cu_seq_lens_k", "max_length_q", "max_length_k", "position_ids", "attention_mask"):
         kwargs.pop(key, None)
+    from verl.utils.kernel.gather_rows import gather_rows
+
     kv_index = prefix_packing.kv_index
-    key_states = key_states.index_select(1, kv_index)
-    value_states = value_states.index_select(1, kv_index)
+    key_states = gather_rows(key_states, kv_index)
+    value_states = gather_rows(value_states, kv_index)
     attn_output = _flash_attention_forward(
         query_states,
         key_states,
