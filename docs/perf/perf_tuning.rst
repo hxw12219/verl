@@ -49,6 +49,12 @@ Below are key factors for tuning vLLM-based rollout. Before tuning, we recommend
   can enlarge the effective batch size in the decoding stage, allowing more concurrent requests per batch. 
   We recommend setting ``max_num_batched_tokens > 2048`` for higher throughput.
 
+  The ``max_num_seqs`` default in ``rollout.yaml`` is 256. vLLM's own default is 1024 on H100, H200, B200 and B300
+  GPUs, so verl caps concurrency there by default. If the stats log shows ``Running`` pinned at ``max_num_seqs``
+  while requests are ``Waiting`` and KV cache usage has room, raise ``actor_rollout_ref.rollout.max_num_seqs``.
+  For example, in a Qwen3-0.6B GRPO run on B300 with about 512 requests per vLLM replica, ``max_num_seqs=512``
+  cut generation time by 4%.
+
 - Use a smaller ``tensor_parallel_size``. 
   When GPU resources allow, a smaller tensor parallel size spawns more vLLM replicas. 
   Data parallelism (DP) can yield higher throughput than tensor parallelism (TP), but also increases KVCache consumption. 
