@@ -36,6 +36,7 @@ from vllm.entrypoints.openai.parser.harmony_utils import get_encoding
 from vllm.inputs import TokensPrompt
 from vllm.lora.request import LoRARequest
 from vllm.outputs import STREAM_FINISHED, RequestOutput
+from vllm.sampling_params import RequestOutputKind
 from vllm.usage.usage_lib import UsageContext
 from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.engine.async_llm import AsyncLLM
@@ -686,6 +687,12 @@ class vLLMHttpServer:
         # setdefault leaves them untouched.
         if not sampling_params.get("stop") and not sampling_params.get("bad_words"):
             sampling_params.setdefault("detokenize", False)
+        # Only the finished output is read below. vLLM's default (CUMULATIVE) builds a RequestOutput
+        # holding every token and logprob so far for each running request on every decode step, and
+        # _generate_admitted drains and drops all of them but the last. FINAL_ONLY emits just the
+        # finished output, with the same token ids and logprobs. Aborted requests still get one
+        # final output carrying the tokens generated before the abort.
+        sampling_params.setdefault("output_kind", RequestOutputKind.FINAL_ONLY)
 
         self._preprocess_sampling_params(sampling_params)
         sampling_params = SamplingParams(max_tokens=max_tokens, **sampling_params)

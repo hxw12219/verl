@@ -36,6 +36,7 @@ pytest.importorskip("ray")
 pytest.importorskip("vllm")
 
 from vllm.logprobs import Logprob
+from vllm.sampling_params import RequestOutputKind
 
 from verl.workers.config import RolloutConfig
 from verl.workers.rollout.vllm_rollout import vllm_async_server
@@ -388,6 +389,27 @@ def test_default_request_hooks_leave_generate_output_unchanged(monkeypatch, fini
         assert output.extra_fields == {"global_steps": 7, "num_cached_tokens": 0}
         assert server.engine.closed == 1
         assert server._admitting == 0
+
+    asyncio.run(main())
+
+
+@pytest.mark.parametrize(
+    ("caller_kind", "expected_kind"),
+    [(None, RequestOutputKind.FINAL_ONLY), (RequestOutputKind.CUMULATIVE, RequestOutputKind.CUMULATIVE)],
+)
+def test_generate_requests_only_the_final_output_unless_caller_overrides(monkeypatch, caller_kind, expected_kind):
+    """generate() reads only the finished output, so vLLM should not build an output per decode step."""
+
+    async def main():
+        server = _make_generating_server(monkeypatch, vllm_async_server.vLLMHttpServer, [_request_output([5, 9])])
+        sampling_params = {"temperature": 1.0, "max_tokens": 2}
+        if caller_kind is not None:
+            sampling_params["output_kind"] = caller_kind
+
+        output = await server.generate([1, 2, 3], sampling_params, "r")
+
+        assert server.engine.sampling_params[0].output_kind == expected_kind
+        assert output.token_ids == [5, 9]
 
     asyncio.run(main())
 
