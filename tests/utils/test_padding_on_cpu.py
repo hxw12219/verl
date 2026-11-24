@@ -302,6 +302,57 @@ def test_no_padding_2_padding_varying_lengths():
     print("All varied length tests passed")
 
 
+@pytest.mark.parametrize("nested", [False, True])
+def test_no_padding_2_padding_matches_per_row_slices(nested):
+    """Values, zero padding, trailing dims, empty responses and gradients match slicing each row."""
+    prompt_lens = [2, 3, 1, 2]
+    response_lens = [3, 1, 4, 0]
+    prompt_width, response_width = 3, 5
+    if nested:
+        data = TensorDict(
+            {
+                "prompts": torch.nested.as_nested_tensor([torch.zeros(n) for n in prompt_lens], layout=torch.jagged),
+                "responses": torch.nested.as_nested_tensor(
+                    [torch.zeros(n) for n in response_lens], layout=torch.jagged
+                ),
+            },
+            batch_size=[len(prompt_lens)],
+        )
+        max_response_len = max(response_lens)
+    else:
+        prompt_mask = torch.zeros(len(prompt_lens), prompt_width, dtype=torch.long)
+        response_mask = torch.zeros(len(response_lens), response_width, dtype=torch.long)
+        for row, (prompt_len, response_len) in enumerate(zip(prompt_lens, response_lens, strict=True)):
+            prompt_mask[row, prompt_width - prompt_len :] = 1
+            response_mask[row, :response_len] = 1
+        data = TensorDict(
+            {
+                "prompts": torch.zeros(len(prompt_lens), prompt_width, dtype=torch.long),
+                "responses": torch.zeros(len(response_lens), response_width, dtype=torch.long),
+                "attention_mask": torch.cat((prompt_mask, response_mask), dim=1),
+            },
+            batch_size=[len(prompt_lens)],
+        )
+        max_response_len = response_width
+    values = torch.randn(sum(prompt_lens) + sum(response_lens), 3, requires_grad=True)
+
+    output = no_padding_2_padding(values, data)
+
+    expected_rows = []
+    offset = 0
+    for prompt_len, response_len in zip(prompt_lens, response_lens, strict=True):
+        start = offset + prompt_len - 1
+        row = values[start : start + response_len]
+        expected_rows.append(torch.cat((row, row.new_zeros(max_response_len - response_len, 3))))
+        offset += prompt_len + response_len
+    expected = torch.stack(expected_rows)
+    torch.testing.assert_close(output, expected, rtol=0, atol=0)
+    weights = torch.randn_like(output)
+    (grad,) = torch.autograd.grad((output * weights).sum(), values)
+    (expected_grad,) = torch.autograd.grad((expected * weights).sum(), values)
+    torch.testing.assert_close(grad, expected_grad, rtol=0, atol=0)
+
+
 def test_build_attention_mask_from_nested_uses_full_sequence_lengths():
     input_ids = torch.nested.as_nested_tensor(
         [

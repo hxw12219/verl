@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import torch
-import torch.nn.functional as F
 from tensordict import TensorDict
 
 from verl.utils import tensordict_utils as tu
@@ -135,16 +134,17 @@ def no_padding_2_padding(tensor: torch.Tensor, data: TensorDict) -> torch.Tensor
     assert sequence_offsets[-1].item() == values.shape[0]
     assert not prompt_lens.eq(0).any(), f"seq_offset - resp_len - 1 assumes prompt_len > 0. Got {prompt_lens}"
 
-    response_list = []
-    # Skip padding dimensions after sequence dimensions, if any.
-    skip_padding = (0, 0) * (values.ndim - 1)
-    for resp_len, seq_offset in zip(response_lens, sequence_offsets, strict=True):
-        pad_size = max_response_len - resp_len
-        # left-shift model output by one token for log_probs/values
-        response_list.append(F.pad(values[seq_offset - resp_len - 1 : seq_offset - 1], (*skip_padding, 0, pad_size)))
-
-    output = torch.stack(response_list, dim=0)
-    return output
+    # Gather every row in one op: slicing row by row syncs the host on each row's tensor bounds. Row b reads
+    # values[seq_offset - resp_len - 1 + t], the model output left-shifted one token for log_probs/values, for
+    # t < resp_len, and is zero after that.
+    response_lens = response_lens.to(values.device)
+    positions = torch.arange(max_response_len, device=values.device)
+    valid = positions < response_lens.unsqueeze(1)
+    rows = (sequence_offsets.to(values.device) - response_lens - 1).unsqueeze(1) + positions
+    # index_select's backward is one index_add_; values[rows] would backpropagate through a sorting index_put.
+    # Padded positions read row 0 and get a zero gradient from masked_fill, so the gradient sums are exact.
+    output = values.index_select(0, torch.where(valid, rows, 0).flatten()).view(*valid.shape, *values.shape[1:])
+    return output.masked_fill(~valid.view(*valid.shape, *([1] * (values.ndim - 1))), 0)
 
 
 def build_attention_mask_from_nested(input_ids: torch.Tensor, max_seq_len: int | None = None) -> torch.Tensor:
