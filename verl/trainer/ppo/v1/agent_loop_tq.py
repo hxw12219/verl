@@ -31,6 +31,7 @@ from verl.experimental.agent_loop import (
     AgentLoopWorker,
     get_trajectory_info,
 )
+from verl.utils.gc_utils import freeze_gc_after_first_step
 from verl.utils.ray_utils import auto_await
 from verl.utils.tensordict_utils import list_of_dict_to_tensordict
 
@@ -57,11 +58,17 @@ class AgentLoopWorkerTQ(AgentLoopWorker):
         super().__init__(*args, **kwargs)
         tq.init()
         self.background_tasks = set()
+        self._dispatched_train_batch = False
 
     async def generate_sequences(self, batch: TensorDict) -> None:
         """Spawn agent loop for each sample in the batch without waiting for the results."""
         validate = batch["validate"] if "validate" in batch else False
         batch.pop("validate", None)
+        # Rollouts run in the background, so the worker is warm once its second training batch arrives.
+        if not validate:
+            if self._dispatched_train_batch:
+                freeze_gc_after_first_step("rollout")
+            self._dispatched_train_batch = True
         config = self.config.actor_rollout_ref.rollout
         sampling_params = dict(
             temperature=config.temperature,

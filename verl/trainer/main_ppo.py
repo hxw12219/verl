@@ -30,6 +30,7 @@ from verl.trainer.constants_ppo import (
 from verl.trainer.ppo.utils import need_critic, need_reference_policy
 from verl.utils.config import validate_config
 from verl.utils.device import auto_set_device, is_cuda_available
+from verl.utils.gc_utils import GC_FREEZE_ENV
 from verl.utils.import_utils import load_class_from_fqn
 from verl.utils.logging_utils import configure_verl_logging
 
@@ -57,6 +58,9 @@ def run_ppo(config, task_runner_class) -> None:
         os.environ["PYTHONHASHSEED"] = str(rollout_cfg.seed)
     if batch_invariant_requested(config):
         export_batch_invariant_env()
+
+    if config.trainer.get("gc_freeze_after_first_step", False):
+        os.environ[GC_FREEZE_ENV] = "1"
 
     trainer_logger = config.trainer.get("logger", [])
     if "rl_insight" in ([trainer_logger] if isinstance(trainer_logger, str) else trainer_logger or []):

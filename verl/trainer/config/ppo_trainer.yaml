@@ -161,6 +161,10 @@ trainer:
   # Directory for logging rollout data; no dump if null
   rollout_data_dir: null
 
+  # Freeze Python's GC heap once after the first step in the driver, training workers and agent-loop workers,
+  # so later full collections skip warmed-up objects. See verl/utils/gc_utils.py.
+  gc_freeze_after_first_step: false
+
   # Directory for logging validation data; no dump if null
   validation_data_dir: null
 

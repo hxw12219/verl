@@ -22,6 +22,7 @@ from ray._private.runtime_env.constants import RAY_JOB_CONFIG_JSON_ENV_VAR
 
 from verl.single_controller.ray.base import TRAINING_WORKER_OMP_NUM_THREADS_ENV
 from verl.utils.device import get_device_capability
+from verl.utils.gc_utils import GC_FREEZE_ENV
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +204,7 @@ def get_ppo_ray_runtime_env(config=None):
             os.environ.get(NVTX_INJECTION_ENV) or "unset",
         )
     # Always forward these at call-time, not import-time.
-    for key in ("VERL_FULL_DETERMINISM", "VLLM_BATCH_INVARIANT", "VERL_RL_INSIGHT_ENABLE"):
+    for key in ("VERL_FULL_DETERMINISM", "VLLM_BATCH_INVARIANT", "VERL_RL_INSIGHT_ENABLE", GC_FREEZE_ENV):
         runtime_env["env_vars"][key] = os.environ.get(key, "0")
     # Forward only when set: empty string breaks vLLM ParallelConfig int parsing.
     for key in (

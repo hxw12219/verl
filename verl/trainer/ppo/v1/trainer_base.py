@@ -86,6 +86,7 @@ from verl.utils.dataset.dataloader import (
 from verl.utils.dataset.rl_dataset import collate_fn
 from verl.utils.debug import marked_timer
 from verl.utils.debug.metrics import calculate_debug_metrics
+from verl.utils.gc_utils import freeze_gc_after_first_step
 from verl.utils.import_utils import load_extern_type
 from verl.utils.metric import reduce_metrics
 from verl.utils.py_functional import rename_dict
@@ -558,6 +559,7 @@ class PPOTrainer(ABC):
             progress_bar.update(1)
             self.global_steps += 1
             SkipManager.set_step(self.global_steps)
+            freeze_gc_after_first_step("training step")
             current_epoch = (
                 (self.global_steps - 1) // self.steps_per_epoch if self.steps_per_epoch is not None else None
             )

@@ -1,7 +1,7 @@
 Performance Tuning Guide
 ==============================
 
-Last updated: 10/22/2026.
+Last updated: 11/24/2026.
 
 Author: `Guangming Sheng <https://github.com/PeterSH6>`_, `Jiali Zheng <https://github.com/CurryRice233>`_
 
@@ -26,6 +26,8 @@ In this section, we will discuss how to tune the performance of all the stages i
 9. Memory optimization for entropy calculation from logits
 
 10. Node-local low-precision gradient communication with VeOmni
+
+11. Freeze the Python GC heap after the first step
 
 Rollout Generation Tuning
 --------------------------
@@ -367,3 +369,15 @@ This processes the tensor in chunks of shape ``[chunk_size, voc]`` (e.g., 2048) 
 Additionally, during training, standard gradient checkpointing (``enable_gradient_checkpointing=True``) does not apply to entropy calculations. To reduce memory peaks in this context, set:
 ``actor_rollout_ref.actor.entropy_checkpointing = True``
 This enables entropy recomputation specifically for the entropy calculation, lowering memory usage during training.
+
+Freeze the Python GC heap after the first step
+----------------------------------------------
+
+After the first step, the trainer driver, training workers and agent-loop workers each hold millions of long-lived
+Python objects. Every full (generation-2) garbage collection rescans all of them, which can stall a step for a second
+or more. Set ``trainer.gc_freeze_after_first_step=True`` to run ``gc.collect()`` and ``gc.freeze()`` once in each of
+these processes after its first step, so later collections only scan newly allocated objects. vLLM does the same after
+its own warm-up.
+
+Frozen objects are still freed when their reference count drops to zero. Only reference cycles that are alive at the
+freeze are never collected, so the extra memory is bounded by the first step's live cycles.
