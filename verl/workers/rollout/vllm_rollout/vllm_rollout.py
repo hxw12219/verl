@@ -237,6 +237,7 @@ class ServerAdapter(BaseRollout):
             zmq_handle=self.zmq_handle,
             bucket_size_mb=bucket_size_mb,
             use_shm=self.use_shm,
+            release_cache=not self.config.checkpoint_engine.keep_trainer_cache,
         )
         await sender.async_send_weights(weights)
 
@@ -296,6 +297,7 @@ class ServerAdapter(BaseRollout):
                 zmq_handle=self.zmq_handle,
                 bucket_size_mb=self.config.checkpoint_engine.update_weights_bucket_megabytes,
                 use_shm=False,
+                release_cache=not self.config.checkpoint_engine.keep_trainer_cache,
             )
             await sender.async_send_weights(iter(flush_tensors))
             if receiver_future is not None:

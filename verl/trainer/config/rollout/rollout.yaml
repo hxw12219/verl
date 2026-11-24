@@ -314,6 +314,11 @@ checkpoint_engine:
   # when using Tensor Parallelism (TP) >= 8.
   update_weights_bucket_megabytes: 2048
 
+  # Keep the trainer's cached device memory across weight syncs to a resident rollout
+  # (free_cache_engine=False) instead of releasing it and allocating it again every step.
+  # The rollout must not need that memory while it loads the new weights.
+  keep_trainer_cache: false
+
   # Additional keyword arguments to pass to the checkpoint engine constructor
   engine_kwargs: {}
 

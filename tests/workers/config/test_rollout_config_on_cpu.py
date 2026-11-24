@@ -34,3 +34,15 @@ def test_prompt_length_must_be_positive():
     # default and a sane value remain valid
     assert RolloutConfig().prompt_length == 512
     assert RolloutConfig(prompt_length=1).prompt_length == 1
+
+
+def test_keep_trainer_cache_requires_resident_rollout():
+    import pytest
+
+    from verl.workers.config.rollout import CheckpointEngineConfig
+
+    checkpoint_engine = CheckpointEngineConfig(keep_trainer_cache=True)
+    with pytest.raises(ValueError, match="requires rollout.free_cache_engine=False"):
+        RolloutConfig(checkpoint_engine=checkpoint_engine)
+    config = RolloutConfig(free_cache_engine=False, checkpoint_engine=checkpoint_engine)
+    assert config.checkpoint_engine.keep_trainer_cache

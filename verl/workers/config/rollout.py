@@ -135,6 +135,10 @@ class CheckpointEngineConfig(BaseConfig):
     backend: Optional[str] = "naive"
     # Bucket size in MB to transfer multiple weights at one time
     update_weights_bucket_megabytes: int = 2048
+    # Keep the trainer's cached device memory across weight syncs to a resident rollout (free_cache_engine=False)
+    # instead of returning it to the driver and allocating it again every step. The rollout must not need
+    # that memory while it loads the new weights.
+    keep_trainer_cache: bool = False
     # Additional keyword arguments for checkpoint engine
     engine_kwargs: dict = field(default_factory=dict)
     # If set, this Python module is imported on every worker process before the
@@ -368,6 +372,12 @@ class RolloutConfig(BaseConfig):
 
         if self.prompt_length <= 0:
             raise ValueError(f"rollout.prompt_length must be positive; got {self.prompt_length}.")
+
+        if self.checkpoint_engine.get("keep_trainer_cache", False) and self.free_cache_engine:
+            raise ValueError(
+                "rollout.checkpoint_engine.keep_trainer_cache=True requires rollout.free_cache_engine=False: "
+                "a rollout that frees its memory after generation needs the trainer's cache back to wake up."
+            )
 
         if self.name != "trtllm" and self.expert_parallel_size > 1:
             assert self.expert_parallel_size == (self.tensor_model_parallel_size * self.data_parallel_size), (

@@ -81,6 +81,7 @@ class BucketedWeightSender:
         zmq_handle: ZMQ IPC socket path (e.g., "ipc:///tmp/rl-colocate-zmq-<uuid>.sock")
         bucket_size_mb: Communication buffer size in MB
         use_shm: Use shared memory instead of CUDA IPC (for NPU compatibility)
+        release_cache: Return the cached device memory to the driver after the transfer
     """
 
     def __init__(
@@ -88,11 +89,13 @@ class BucketedWeightSender:
         zmq_handle: str,
         bucket_size_mb: int = 512,
         use_shm: bool = False,
+        release_cache: bool = True,
     ):
         self.zmq_handle = zmq_handle
         self.bucket_size_mb = bucket_size_mb
         self.bucket_size = int(bucket_size_mb) << 20
         self.use_shm = use_shm
+        self.release_cache = release_cache
 
         self.zmq_context = zmq.Context.instance()
         self.socket = None
@@ -218,7 +221,8 @@ class BucketedWeightSender:
             self.shm = None
         if is_support_ipc():
             get_torch_device().ipc_collect()
-        get_torch_device().empty_cache()
+        if self.release_cache:
+            get_torch_device().empty_cache()
 
     def _direct_send_large_weight(self, name: str, weight: torch.Tensor):
         """Send a weight larger than the bucket size via cuda ipc or share memory."""

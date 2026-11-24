@@ -849,8 +849,11 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                 self.actor.engine.to("cpu", model=True, optimizer=False, grad=False)
             return metrics or {}
 
+        # A resident rollout does not need the trainer's cached memory, so the trainer may keep it for the next step.
+        release_trainer_cache = not self.config.rollout.checkpoint_engine.get("keep_trainer_cache", False)
         set_expandable_segments(False)
-        get_torch_device().empty_cache()
+        if release_trainer_cache:
+            get_torch_device().empty_cache()
         log_gpu_memory_usage("Before resume weights", logger=logger)
 
         # 1. resume rollout memory (weights were released during sleep)
@@ -895,7 +898,8 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         if self.actor.engine.is_param_offload_enabled:
             self.actor.engine.to("cpu", model=True, optimizer=False, grad=False)
         get_torch_device().synchronize()
-        get_torch_device().empty_cache()
+        if release_trainer_cache:
+            get_torch_device().empty_cache()
         log_gpu_memory_usage("After offload model to cpu", logger=logger)
 
         # 4. resume kv_cache
